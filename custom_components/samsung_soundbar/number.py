@@ -1,76 +1,46 @@
 import logging
 
-from homeassistant.components.number import (
-    NumberEntity,
-    NumberEntityDescription,
-    NumberMode,
-)
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.components.number import NumberEntity, NumberMode
 
 from .api_extension.SoundbarDevice import SoundbarDevice
-from .const import CONF_ENTRY_DEVICE_ID, CONF_ENTRY_SETTINGS_WOOFER_NUMBER, DOMAIN
-from .models import DeviceConfig
+from .const import DOMAIN
+from .models import SoundbarConfig
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
-    domain_data = hass.data[DOMAIN]
+async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
+    domain_data: SoundbarConfig = hass.data.get(DOMAIN)
+    if not domain_data:
+        return
 
-    entities = []
-    for key in domain_data.devices:
-        device_config: DeviceConfig = domain_data.devices[key]
-        device = device_config.device
-        if device.device_id == config_entry.data.get(
-            CONF_ENTRY_DEVICE_ID
-        ) and config_entry.data.get(CONF_ENTRY_SETTINGS_WOOFER_NUMBER):
-            entities.append(
-                SoundbarWooferNumberEntity(
-                    device,
-                    "woofer_level",
-                )
-            )
-    async_add_entities(entities)
-    return True
+    for device_id, device_config in domain_data.devices.items():
+        device: SoundbarDevice = device_config.device
+        async_add_entities([WooferLevelNumber(device)])
 
 
-class SoundbarWooferNumberEntity(NumberEntity):
-    def __init__(
-        self,
-        device: SoundbarDevice,
-        append_unique_id: str,
-    ):
-        self.entity_id = f"number.{device.device_name}_{append_unique_id}"
-        self.entity_description = NumberEntityDescription(
-            native_max_value=6,
-            native_min_value=-10,
-            mode=NumberMode.BOX,
-            native_step=1,
-            native_unit_of_measurement="dB",
-            key=append_unique_id,
-        )
-        self.__device = device
-        self._attr_unique_id = f"{device.device_id}_sw_{append_unique_id}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.__device.device_id)},
-            name=self.__device.device_name,
-            manufacturer=self.__device.manufacturer,
-            model=self.__device.model,
-            sw_version=self.__device.firmware_version,
-        )
-        self.__append_unique_id = append_unique_id
+class WooferLevelNumber(NumberEntity):
+    _attr_native_min_value = -10
+    _attr_native_max_value = 6
+    _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
+    _attr_native_unit_of_measurement = "dB"
 
-    # ---------- GENERAL ---------------
-
-    @property
-    def name(self):
-        return self.__append_unique_id
-
-    # ------ STATE FUNCTIONS --------
+    def __init__(self, device: SoundbarDevice):
+        self._device = device
+        self._attr_unique_id = f"{device.device_id}_number_woofer"
+        self._attr_name = f"{device.device_name} Woofer Level"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, device.device_id)},
+            "name": device.device_name,
+            "manufacturer": device.manufacturer,
+            "model": device.model,
+            "sw_version": device.firmware_version,
+        }
 
     @property
     def native_value(self) -> float | None:
-        return self.__device.woofer_level
+        return float(self._device.woofer_level)
 
     async def async_set_native_value(self, value: float):
-        await self.__device.set_woofer(int(value))
+        await self._device.set_woofer(int(value))

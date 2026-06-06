@@ -1,294 +1,152 @@
 import logging
-from typing import Any, Mapping
 
 from homeassistant.components.media_player import (
-    DEVICE_CLASS_SPEAKER,
     MediaPlayerEntity,
+    MediaPlayerEntityFeature,
 )
-from homeassistant.components.media_player.const import MediaPlayerEntityFeature
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.entity import DeviceInfo, generate_entity_id
-from homeassistant.helpers import config_validation as cv, entity_platform, selector
-import voluptuous as vol
+from homeassistant.helpers.entity import DeviceInfo
 
 from .api_extension.SoundbarDevice import SoundbarDevice
 from .api_extension.const import SpeakerIdentifier, RearSpeakerMode
-from .const import (
-    CONF_ENTRY_API_KEY,
-    CONF_ENTRY_DEVICE_ID,
-    CONF_ENTRY_DEVICE_NAME,
-    CONF_ENTRY_MAX_VOLUME,
-    DOMAIN,
-)
-from .models import DeviceConfig
+from .const import DOMAIN
+from .models import SoundbarConfig
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_NAME = "SmartThings Soundbar"
-CONF_MAX_VOLUME = "max_volume"
-
-SUPPORT_SMARTTHINGS_SOUNDBAR = (
+SUPPORT_FEATURES = (
     MediaPlayerEntityFeature.PAUSE
     | MediaPlayerEntityFeature.VOLUME_STEP
     | MediaPlayerEntityFeature.VOLUME_MUTE
     | MediaPlayerEntityFeature.VOLUME_SET
-    | MediaPlayerEntityFeature.SELECT_SOURCE
     | MediaPlayerEntityFeature.TURN_OFF
     | MediaPlayerEntityFeature.TURN_ON
     | MediaPlayerEntityFeature.PLAY
     | MediaPlayerEntityFeature.NEXT_TRACK
     | MediaPlayerEntityFeature.PREVIOUS_TRACK
     | MediaPlayerEntityFeature.STOP
+    | MediaPlayerEntityFeature.SELECT_SOURCE
     | MediaPlayerEntityFeature.SELECT_SOUND_MODE
 )
 
 
-def addServices():
-    platform = entity_platform.async_get_current_platform()
+async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
+    domain_data: SoundbarConfig = hass.data.get(DOMAIN)
+    if not domain_data:
+        return
 
-    platform.async_register_entity_service(
-        "select_soundmode",
-        cv.make_entity_service_schema({vol.Required("sound_mode"): str}),
-        SmartThingsSoundbarMediaPlayer.async_select_sound_mode.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_woofer_level",
-        cv.make_entity_service_schema(
-            {vol.Required("level"): vol.All(int, vol.Range(min=-12, max=6))}
-        ),
-        SmartThingsSoundbarMediaPlayer.async_set_woofer_level.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_night_mode",
-        cv.make_entity_service_schema({vol.Required("enabled"): bool}),
-        SmartThingsSoundbarMediaPlayer.async_set_night_mode.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_bass_enhancer",
-        cv.make_entity_service_schema({vol.Required("enabled"): bool}),
-        SmartThingsSoundbarMediaPlayer.async_set_bass_mode.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_voice_enhancer",
-        cv.make_entity_service_schema({vol.Required("enabled"): bool}),
-        SmartThingsSoundbarMediaPlayer.async_set_voice_mode.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_speaker_level",
-        cv.make_entity_service_schema(
-            {vol.Required("speaker_identifier"): str, vol.Required("level"): int}
-        ),
-        SmartThingsSoundbarMediaPlayer.async_set_speaker_level.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_rear_speaker_mode",
-        cv.make_entity_service_schema({vol.Required("speaker_mode"): str}),
-        SmartThingsSoundbarMediaPlayer.async_set_rear_speaker_mode.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_active_voice_amplifier",
-        cv.make_entity_service_schema({vol.Required("enabled"): bool}),
-        SmartThingsSoundbarMediaPlayer.async_set_active_voice_amplifier.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_space_fit_sound",
-        cv.make_entity_service_schema({vol.Required("enabled"): bool}),
-        SmartThingsSoundbarMediaPlayer.async_set_space_fit_sound.__name__,
-    )
+    for device_id, device_config in domain_data.devices.items():
+        device: SoundbarDevice = device_config.device
+        async_add_entities([SoundbarMediaPlayer(device)])
 
 
-
-
-async def async_setup_entry(hass, config_entry, async_add_entities):
-    domain_data = hass.data[DOMAIN]
-
-    addServices()
-
-    entities = []
-    for key in domain_data.devices:
-        device_config: DeviceConfig = domain_data.devices[key]
-        session = async_get_clientsession(hass)
-        device = device_config.device
-        if device.device_id == config_entry.data.get(CONF_ENTRY_DEVICE_ID):
-            entity_id = generate_entity_id(
-                "media_player.{}", device.device_name, hass=hass
-            )
-            entities.append(SmartThingsSoundbarMediaPlayer(device, entity_id, session))
-    async_add_entities(entities)
-    return True
-
-
-class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
-    def __init__(self, device: SoundbarDevice, entity_id: str, session):
-        self.session = session
-        self.device = device
-        self.entity_id = entity_id
-        self._attr_unique_id = f"{self.device.device_id}_mp"
-
+class SoundbarMediaPlayer(MediaPlayerEntity):
+    def __init__(self, device: SoundbarDevice):
+        self._device = device
+        self._attr_unique_id = f"{device.device_id}_mp"
+        self._attr_name = device.device_name
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.device.device_id)},
-            name=self.device.device_name,
-            manufacturer=self.device.manufacturer,
-            model=self.device.model,
-            sw_version=self.device.firmware_version,
+            identifiers={(DOMAIN, device.device_id)},
+            name=device.device_name,
+            manufacturer=device.manufacturer,
+            model=device.model,
+            sw_version=device.firmware_version,
         )
 
     async def async_update(self):
-        await self.device.update()
-
-    # ---------- GENERAL SETTINGS ------------
-
-    @property
-    def device_class(self):
-        return DEVICE_CLASS_SPEAKER
+        await self._device.update()
 
     @property
     def supported_features(self):
-        return SUPPORT_SMARTTHINGS_SOUNDBAR
-
-    @property
-    def name(self):
-        return self.device.device_name
-
-    # ---------- POWER ON/OFF ------------
+        return SUPPORT_FEATURES
 
     @property
     def state(self):
-        return self.device.state
+        return self._device.state
 
     async def async_turn_off(self):
-        await self.device.switch_off()
+        await self._device.switch_off()
 
     async def async_turn_on(self):
-        await self.device.switch_on()
-
-    # ---------- VOLUME ------------
-    @property
-    def volume_level(self):
-        return self.device.volume_level
+        await self._device.switch_on()
 
     @property
-    def is_volume_muted(self):
-        return self.device.volume_muted
+    def volume_level(self) -> float | None:
+        return self._device.volume_level
 
-    async def async_set_volume_level(self, volume):
-        await self.device.set_volume(volume)
+    @property
+    def is_volume_muted(self) -> bool | None:
+        return self._device.volume_muted
 
-    async def async_mute_volume(self, mute):
-        await self.device.mute_volume(mute)
+    async def async_set_volume_level(self, volume: float):
+        await self._device.set_volume(volume)
+
+    async def async_mute_volume(self, mute: bool):
+        await self._device.mute_volume(mute)
 
     async def async_volume_up(self):
-        await self.device.volume_up()
+        await self._device.volume_up()
 
     async def async_volume_down(self):
-        await self.device.volume_down()
-
-    # ---------- INPUT SOURCES ------------
+        await self._device.volume_down()
 
     @property
-    def source(self):
-        return self.device.input_source
+    def source(self) -> str | None:
+        return self._device.input_source
 
     @property
-    def source_list(self):
-        return self.device.supported_input_sources
+    def source_list(self) -> list[str] | None:
+        return self._device.supported_input_sources
 
-    async def async_select_source(self, source):
-        await self.device.select_source(source)
-
-    # ---------- SOUND MODE ------------
+    async def async_select_source(self, source: str):
+        await self._device.select_source(source)
 
     @property
     def sound_mode(self) -> str | None:
-        return self.device.sound_mode
+        return self._device.sound_mode
 
     @property
     def sound_mode_list(self) -> list[str] | None:
-        return self.device.supported_soundmodes
+        return self._device.supported_soundmodes
 
-    async def async_select_sound_mode(self, sound_mode):
-        await self.device.select_sound_mode(sound_mode)
+    async def async_select_sound_mode(self, sound_mode: str):
+        await self._device.select_sound_mode(sound_mode)
 
-    # ---------- MEDIA ------------
     @property
-    def media_title(self):
-        return self.device.media_title
+    def media_title(self) -> str | None:
+        return self._device.media_title
 
     @property
     def media_artist(self) -> str | None:
-        return self.device.media_artist
-
-    @property
-    def media_duration(self) -> int | None:
-        return self.device.media_duration
-
-    @property
-    def media_position(self):
-        return self.device.media_position
+        return self._device.media_artist
 
     @property
     def media_image_url(self) -> str | None:
-        return self.device.media_coverart_url
-
-    @property
-    def app_name(self) -> str | None:
-        return self.device.media_app_name
+        return self._device.media_coverart_url
 
     async def async_media_play(self):
-        await self.device.media_play()
+        await self._device.media_play()
 
     async def async_media_pause(self):
-        await self.device.media_pause()
-
-    async def async_media_next_track(self):
-        await self.device.media_next_track()
-
-    async def async_media_previous_track(self):
-        await self.device.media_previous_track()
+        await self._device.media_pause()
 
     async def async_media_stop(self):
-        await self.device.media_stop()
+        await self._device.media_stop()
 
-    # ---------- SERVICE_UTILITY ------------
+    async def async_media_next_track(self):
+        await self._device.media_next_track()
 
-    async def async_set_woofer_level(self, level: int):
-        await self.device.set_woofer(level)
+    async def async_media_previous_track(self):
+        await self._device.media_previous_track()
+
+    # Extra services (mirror from switch/number entities for convenience)
+    async def async_set_night_mode(self, enabled: bool):
+        await self._device.set_night_mode(enabled)
 
     async def async_set_bass_mode(self, enabled: bool):
-        await self.device.set_bass_mode(enabled)
+        await self._device.set_bass_mode(enabled)
 
     async def async_set_voice_mode(self, enabled: bool):
-        await self.device.set_voice_amplifier(enabled)
+        await self._device.set_voice_amplifier(enabled)
 
-    async def async_set_night_mode(self, enabled: bool):
-        await self.device.set_night_mode(enabled)
-
-    # ---------- SERVICE_UTILITY ------------
-
-    async def async_set_speaker_level(self, speaker_identifier: str, level: int):
-        await self.device.set_speaker_level(
-            SpeakerIdentifier(speaker_identifier), level
-        )
-
-    async def async_set_rear_speaker_mode(self, speaker_mode: str):
-        await self.device.set_rear_speaker_mode(RearSpeakerMode(speaker_mode))
-
-    async def async_set_active_voice_amplifier(self, enabled: bool):
-        await self.device.set_active_voice_amplifier(enabled)
-
-    async def async_set_space_fit_sound(self, enabled: bool):
-        await self.device.set_space_fit_sound(enabled)
-
-    # This property can be uncommented for some extra_attributes
-    # Still enabling this can cause side-effects.
-    # @property
-    # def extra_state_attributes(self) -> Mapping[str, Any] | None:
-    #     return {"device_information": self.device.retrieve_data}
+    async def async_set_woofer_level(self, level: int):
+        await self._device.set_woofer(level)

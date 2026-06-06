@@ -1,15 +1,14 @@
 from enum import Enum
 
-
 class SpeakerIdentifier(Enum):
-    CENTER = "Spk_Center"
-    SIDE = "Spk_Side"
-    WIDE = "Spk_Wide"
-    FRONT_TOP = "Spk_Front_Top"
-    REAR = "Spk_Rear"
-    REAR_TOP = "Spk_Rear_Top"
-
+    FRONT_LEFT = "frontLeft"
+    FRONT_RIGHT = "frontRight"
+    SURROUND_LEFT = "surroundLeft"
+    SURROUND_RIGHT = "surroundRight"
+    CENTER = "center"
+    SUBWOOFER = "subwoofer"
 
 class RearSpeakerMode(Enum):
-    FRONT = "Front"
-    REAR = "Rear"
+    OFF = "off"
+    REAR_ONLY = "rear"
+    FRONT_REAR = "surround"
