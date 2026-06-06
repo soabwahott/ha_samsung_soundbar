@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 
 from homeassistant.components.media_player import (
     MediaPlayerEntity,
@@ -12,6 +13,8 @@ from .const import DOMAIN
 from .models import SoundbarConfig
 
 _LOGGER = logging.getLogger(__name__)
+SCAN_INTERVAL = timedelta(minutes=5)
+
 
 SUPPORT_FEATURES = (
     MediaPlayerEntityFeature.PAUSE

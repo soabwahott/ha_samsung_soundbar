@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from homeassistant.components.image import ImageEntity
 
@@ -8,6 +8,8 @@ from .const import DOMAIN
 from .models import SoundbarConfig
 
 _LOGGER = logging.getLogger(__name__)
+SCAN_INTERVAL = timedelta(minutes=5)
+
 
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):

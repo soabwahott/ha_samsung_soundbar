@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.helpers.entity import DeviceInfo
@@ -9,6 +10,8 @@ from .const import DOMAIN
 from .models import SoundbarConfig
 
 _LOGGER = logging.getLogger(__name__)
+SCAN_INTERVAL = timedelta(minutes=5)
+
 
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
