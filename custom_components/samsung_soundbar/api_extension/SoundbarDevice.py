@@ -18,9 +18,9 @@ class SoundbarDevice:
         self._max_volume = 100
         self._device_name = "Living Room Soundbar"
 
-        self._night_mode = 0
-        self._bass_mode = 0
-        self._voice_amplifier = 0
+        self._night_mode = None
+        self._bass_mode = None
+        self._voice_amplifier = None
         self._woofer_level = 0
         self._woofer_connection = ""
         self._sound_mode = ""
@@ -233,11 +233,20 @@ class SoundbarDevice:
     @property
     def supported_soundmodes(self): return self._supported_soundmodes
     @property
-    def night_mode(self) -> bool: return self._night_mode == 1
+    def night_mode(self) -> bool | None:
+        if self._night_mode is None:
+            return None
+        return self._night_mode == 1
     @property
-    def bass_mode(self) -> bool: return self._bass_mode == 1
+    def bass_mode(self) -> bool | None:
+        if self._bass_mode is None:
+            return None
+        return self._bass_mode == 1
     @property
-    def voice_amplifier(self) -> bool: return self._voice_amplifier == 1
+    def voice_amplifier(self) -> bool | None:
+        if self._voice_amplifier is None:
+            return None
+        return self._voice_amplifier == 1
     @property
     def woofer_level(self) -> int: return self._woofer_level
     @property
