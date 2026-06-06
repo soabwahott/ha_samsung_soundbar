@@ -116,12 +116,13 @@ class SoundbarDevice:
         switch = comp.get("switch", {})
         self._state = "playing" if switch.get("switch", {}).get("value") == "on" else "off"
 
-        volume = comp.get("volume", {})
-        self._volume = volume.get("level", {}).get("value", 0)
-        self._muted = comp.get("mute", {}).get("mute", {}).get("value") == "muted"
+        volume = comp.get("audioVolume", {})
+        self._volume = volume.get("volume", {}).get("value", 0)
+        self._muted = comp.get("audioMute", {}).get("mute", {}).get("value") == "muted"
 
-        audio = comp.get("audioInputSource", {})
+        audio = comp.get("samsungvd.audioInputSource", {})
         self._input_source = audio.get("inputSource", {}).get("value", "digital")
+        self._supported_input_sources = audio.get("supportedInputSources", {}).get("value", self._supported_input_sources)
 
         track = comp.get("audioTrackData", {})
         track_data = track.get("audioTrackData", {}).get("value", {})

@@ -2,6 +2,7 @@ import logging
 from datetime import timedelta
 
 from homeassistant.components.sensor import SensorEntity
+from homeassistant.const import PERCENTAGE
 
 from .api_extension.SoundbarDevice import SoundbarDevice
 from .const import DOMAIN
@@ -28,6 +29,7 @@ class VolumeSensor(SensorEntity):
         self._attr_unique_id = f"{device.device_id}_sensor_volume"
         self._attr_name = f"{device.device_name} Volume"
         self._attr_icon = "mdi:volume-high"
+        self._attr_native_unit_of_measurement = PERCENTAGE
         self._attr_device_info = {
             "identifiers": {(DOMAIN, device.device_id)},
             "name": device.device_name,
@@ -36,6 +38,7 @@ class VolumeSensor(SensorEntity):
             "sw_version": device.firmware_version,
         }
 
-    def update(self):
+    async def async_update(self):
+        await self._device.update()
         val = self._device._volume
-        self._attr_native_value = val if val is not None else 0
+        self._attr_native_value = val if val is not None else None
