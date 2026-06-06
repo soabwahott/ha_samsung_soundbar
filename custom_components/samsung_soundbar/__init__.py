@@ -35,8 +35,9 @@ async def async_setup(hass: HomeAssistant, config: dict):
 
     hass.data.setdefault(DOMAIN, SoundbarConfig(None, {}))
 
+    # Do not call SmartThings during setup. If the API is rate-limited at startup,
+    # entity registration must still complete; entities will refresh after setup.
     soundbar = SoundbarDevice(token, device_id, session)
-    await soundbar.update()
 
     hass.data[DOMAIN].devices[device_id] = DeviceConfig(
         {"device_id": device_id, "device_name": device_name, "token": token},

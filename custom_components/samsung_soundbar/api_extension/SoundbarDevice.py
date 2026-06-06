@@ -23,7 +23,7 @@ class SoundbarDevice:
         self._woofer_level = 0
         self._woofer_connection = ""
         self._sound_mode = ""
-        self._supported_soundmodes = []
+        self._supported_soundmodes = ["standard", "surround", "game", "adaptive"]
         self._media_title = ""
         self._media_artist = ""
         self._media_cover_url = ""
@@ -129,22 +129,11 @@ class SoundbarDevice:
         self._model = ocf.get("ocf.modelNumber", {}).get("value", "HW-S60B")
         self._firmware_version = ocf.get("ocf.firmwareVersion", {}).get("value", "unknown")
 
-        # Samsung Audio API status
-        payload = await self._sam_read("/sec/networkaudio/advancedaudio")
-        if "x.com.samsung.networkaudio.nightmode" in payload:
-            self._night_mode = payload["x.com.samsung.networkaudio.nightmode"]
-            self._bass_mode = payload["x.com.samsung.networkaudio.bassboost"]
-            self._voice_amplifier = payload["x.com.samsung.networkaudio.voiceamplifier"]
-
-        payload = await self._sam_read("/sec/networkaudio/soundmode")
-        if "x.com.samsung.networkaudio.soundmode" in payload:
-            self._sound_mode = payload["x.com.samsung.networkaudio.soundmode"]
-            self._supported_soundmodes = payload.get("x.com.samsung.networkaudio.supportedSoundmode", [])
-
-        payload = await self._sam_read("/sec/networkaudio/woofer")
-        if "x.com.samsung.networkaudio.woofer" in payload:
-            self._woofer_level = payload["x.com.samsung.networkaudio.woofer"]
-            self._woofer_connection = payload.get("x.com.samsung.networkaudio.connection", "")
+        # Do not poll Samsung advanced-audio resources during the normal HA update
+        # cycle. Those require multiple SmartThings execute/status calls and can
+        # quickly exhaust the PAT rate limit. Advanced settings are updated when
+        # commands are sent; default values remain safe until a future explicit
+        # low-frequency refresh is added.
 
     async def _fetch_artwork(self, artist: str, title: str) -> str:
         if not artist or not title:
@@ -234,18 +223,23 @@ class SoundbarDevice:
 
     async def select_sound_mode(self, sound_mode: str):
         await self._sam_write("/sec/networkaudio/soundmode", "x.com.samsung.networkaudio.soundmode", sound_mode)
+        self._sound_mode = sound_mode
 
     async def set_night_mode(self, value: bool):
         await self._sam_write("/sec/networkaudio/advancedaudio", "x.com.samsung.networkaudio.nightmode", 1 if value else 0)
+        self._night_mode = 1 if value else 0
 
     async def set_bass_mode(self, value: bool):
         await self._sam_write("/sec/networkaudio/advancedaudio", "x.com.samsung.networkaudio.bassboost", 1 if value else 0)
+        self._bass_mode = 1 if value else 0
 
     async def set_voice_amplifier(self, value: bool):
         await self._sam_write("/sec/networkaudio/advancedaudio", "x.com.samsung.networkaudio.voiceamplifier", 1 if value else 0)
+        self._voice_amplifier = 1 if value else 0
 
     async def set_woofer(self, level: int):
         await self._sam_write("/sec/networkaudio/woofer", "x.com.samsung.networkaudio.woofer", level)
+        self._woofer_level = level
 
     async def media_play(self):
         await self._cmd("mediaPlayback", "play")
