@@ -24,8 +24,6 @@ class SoundbarDevice:
         self._woofer_connection = ""
         self._sound_mode = ""
         self._supported_soundmodes = []
-        self._eq_preset = ""
-        self._supported_eq_presets = []
         self._media_title = ""
         self._media_artist = ""
         self._media_cover_url = ""
@@ -41,52 +39,74 @@ class SoundbarDevice:
         self._model = "HW-S60B"
         self._firmware_version = "unknown"
 
-    async def _api_get(self, path: str):
-        url = SMARTTHINGS_BASE + path
-        headers = {"Authorization": f"Bearer {self._token}"}
-        async with self._session.get(url, headers=headers) as resp:
-            data = await resp.json()
-            if not resp.ok:
-                log.error("[soundbar] API GET %s failed: %s", path, data)
-            return data
+    # -------- Core API helpers (matching working standalone script) --------
 
-    async def _api_post(self, path: str, json_data: dict):
+    async def _api(self, method: str, path: str, data: dict | None = None):
+        """Low-level API call - uses /commands endpoint pattern (same as working script)."""
         url = SMARTTHINGS_BASE + path
-        headers = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json", "Accept": "application/json"}
-        async with self._session.post(url, headers=headers, json=json_data) as resp:
-            data = await resp.json()
-            if not resp.ok:
-                log.error("[soundbar] API POST %s failed: %s", path, data)
-            return data
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        body = json.dumps(data).encode() if data else None
+
+        async with self._session.request(method, url, headers=headers, data=body) as resp:
+            text = await resp.text()
+            try:
+                return json.loads(text)
+            except:
+                return text
+
+    async def _cmd(self, capability: str, command: str, *args):
+        """Execute a command via /devices/{id}/commands endpoint (the working way)."""
+        payload = {"commands": [{"component": "main", "capability": capability, "command": command, "arguments": list(args)}]}
+        result = await self._api("POST", f"/devices/{self._device_id}/commands", payload)
+        if isinstance(result, dict):
+            return result.get("results", [{}])[0].get("status", "")
+        return str(result)
+
+    async def _sam_read(self, href: str) -> dict:
+        """Read Samsung Audio API resource: trigger execute + poll status."""
+        await self._cmd("execute", "execute", href)
+        await asyncio.sleep(0.3)
+        for _ in range(8):
+            status = await self._api("GET", f"/devices/{self._device_id}/components/main/capabilities/execute/status")
+            val = status.get("data", {}).get("value")
+            if val and isinstance(val, dict):
+                return val.get("payload", {})
+            await asyncio.sleep(0.2)
+        return {}
+
+    async def _sam_write(self, href: str, prop: str, value):
+        """Write Samsung Audio API property using two-argument format: [href, {prop: value}]."""
+        payload = {"commands": [{"component": "main", "capability": "execute", "command": "execute", "arguments": [href, {prop: value}]}]}
+        result = await self._api("POST", f"/devices/{self._device_id}/commands", payload)
+        if isinstance(result, dict):
+            return result.get("results", [{}])[0].get("status", "")
+        return str(result)
+
+    # -------- Update --------
 
     async def update(self):
         """Poll device status from SmartThings."""
-        device_data = await self._api_get(f"/devices/{self._device_id}/status")
-        if "components" not in device_data:
-            log.warning("[soundbar] Device status returned: %s", device_data)
+        data = await self._api("GET", f"/devices/{self._device_id}/status")
+        if "components" not in data:
+            log.warning("[soundbar] Device status returned: %s", data)
             return
 
-        comp = device_data["components"].get("main", {})
+        comp = data["components"].get("main", {})
 
-        # Power / state
         switch = comp.get("switch", {})
-        if switch.get("switch", {}).get("value") == "on":
-            self._state = "playing"
-        else:
-            self._state = "off"
+        self._state = "playing" if switch.get("switch", {}).get("value") == "on" else "off"
 
-        # Volume
         volume = comp.get("volume", {})
         self._volume = volume.get("level", {}).get("value", 0)
-        mute = comp.get("mute", {})
-        self._muted = mute.get("mute", {}).get("value") == "muted"
+        self._muted = comp.get("mute", {}).get("mute", {}).get("value") == "muted"
 
-        # Input source
         audio = comp.get("audioInputSource", {})
-        src = audio.get("inputSource", {})
-        self._input_source = src.get("value", "digital")
+        self._input_source = audio.get("inputSource", {}).get("value", "digital")
 
-        # Media info
         track = comp.get("audioTrackData", {})
         track_data = track.get("audioTrackData", {}).get("value", {})
         self._media_artist = track_data.get("artist", "")
@@ -94,86 +114,36 @@ class SoundbarDevice:
         if self._media_title and self._media_title != self._old_media_title:
             self._old_media_title = self._media_title
             self._media_cover_url_update_time = datetime.datetime.now()
-            self._media_cover_url = await self._fetch_artwork(
-                self._media_artist, self._media_title
-            )
+            self._media_cover_url = await self._fetch_artwork(self._media_artist, self._media_title)
 
-        # Device info
         ocf = comp.get("ocf", {})
         self._manufacturer = ocf.get("ocf.manufacturerName", {}).get("value", "Samsung")
         self._model = ocf.get("ocf.modelNumber", {}).get("value", "HW-S60B")
         self._firmware_version = ocf.get("ocf.firmwareVersion", {}).get("value", "unknown")
 
-        # Samsung Audio API: advanced audio (night mode, bass, voice)
-        await self._update_advanced_audio()
-        # Sound mode
-        await self._update_soundmode()
-        # Woofer
-        await self._update_woofer()
-
-    async def _update_advanced_audio(self):
-        await self._execute(["/sec/networkaudio/advancedaudio"])
-        await asyncio.sleep(0.5)
-        payload = await self._get_execute_status()
+        # Samsung Audio API status
+        payload = await self._sam_read("/sec/networkaudio/advancedaudio")
         if "x.com.samsung.networkaudio.nightmode" in payload:
             self._night_mode = payload["x.com.samsung.networkaudio.nightmode"]
             self._bass_mode = payload["x.com.samsung.networkaudio.bassboost"]
             self._voice_amplifier = payload["x.com.samsung.networkaudio.voiceamplifier"]
 
-    async def _update_soundmode(self):
-        await self._execute(["/sec/networkaudio/soundmode"])
-        await asyncio.sleep(0.5)
-        payload = await self._get_execute_status()
+        payload = await self._sam_read("/sec/networkaudio/soundmode")
         if "x.com.samsung.networkaudio.soundmode" in payload:
             self._sound_mode = payload["x.com.samsung.networkaudio.soundmode"]
-            self._supported_soundmodes = payload.get(
-                "x.com.samsung.networkaudio.supportedSoundmode", []
-            )
+            self._supported_soundmodes = payload.get("x.com.samsung.networkaudio.supportedSoundmode", [])
 
-    async def _update_woofer(self):
-        await self._execute(["/sec/networkaudio/woofer"])
-        await asyncio.sleep(0.3)
-        payload = await self._get_execute_status()
+        payload = await self._sam_read("/sec/networkaudio/woofer")
         if "x.com.samsung.networkaudio.woofer" in payload:
             self._woofer_level = payload["x.com.samsung.networkaudio.woofer"]
             self._woofer_connection = payload.get("x.com.samsung.networkaudio.connection", "")
-
-    async def _execute(self, argument):
-        """Trigger Samsung Audio API resource path."""
-        path = f"/devices/{self._device_id}/components/main/capabilities/execute/executions"
-        await self._api_post(path, {"commands": [{"component": "main", "capability": "execute", "command": "execute", "arguments": argument}]})
-
-    async def _get_execute_status(self) -> dict:
-        """Poll Samsung Audio API status endpoint."""
-        path = f"/devices/{self._device_id}/components/main/capabilities/execute/status"
-        data = await self._api_get(path)
-        if "data" in data:
-            value = data["data"].get("value", {})
-            if isinstance(value, dict) and "payload" in value:
-                return value["payload"]
-        return {}
-
-    async def _sam_write(self, href: str, property_name: str, value):
-        """Write Samsung Audio API property."""
-        await self._execute([href])
-        await asyncio.sleep(0.3)
-        path = f"/devices/{self._device_id}/components/main/capabilities/execute/executions"
-        await self._api_post(path, {
-            "commands": [{
-                "component": "main",
-                "capability": "execute",
-                "command": "execute",
-                "arguments": [href, {property_name: value}]
-            }]
-        })
 
     async def _fetch_artwork(self, artist: str, title: str) -> str:
         if not artist or not title:
             return ""
         query = quote(f"{artist} {title}")
-        url = f"https://itunes.apple.com/search?term={query}&media=music&entity=musicTrack&limit=1"
         try:
-            async with self._session.get(url) as resp:
+            async with self._session.get(f"https://itunes.apple.com/search?term={query}&media=music&entity=musicTrack&limit=1") as resp:
                 data = await resp.json()
                 results = data.get("results", [])
                 if results:
@@ -194,117 +164,30 @@ class SoundbarDevice:
     def model(self): return self._model
     @property
     def firmware_version(self): return self._firmware_version
-
     @property
-    def state(self) -> str:
-        return self._state
-
+    def state(self) -> str: return self._state
     @property
-    def volume_level(self) -> float:
-        vol = self._volume
-        if vol > self._max_volume:
-            return 1.0
-        return vol / self._max_volume
-
+    def volume_level(self) -> float: return min(self._volume / self._max_volume, 1.0)
     @property
-    def volume_muted(self) -> bool:
-        return self._muted
-
-    async def set_volume(self, volume: float):
-        level = int(volume * self._max_volume)
-        path = f"/devices/{self._device_id}/components/main/capabilities/volume/execute"
-        await self._api_post(path, {
-            "commands": [{"component": "main", "capability": "execute", "command": "setVolume", "arguments": [level]}]
-        })
-
-    async def mute_volume(self, mute: bool):
-        path = f"/devices/{self._device_id}/components/main/capabilities/mute/execute"
-        cmd = "mute" if mute else "unmute"
-        await self._api_post(path, {
-            "commands": [{"component": "main", "capability": "execute", "command": cmd, "arguments": []}]
-        })
-
-    async def volume_up(self):
-        path = f"/devices/{self._device_id}/components/main/capabilities/audioNotification/execute"
-        await self._api_post(path, {
-            "commands": [{"component": "main", "capability": "execute", "command": "playFeedback", "arguments": [{"type": "volume", "command": "increase"}]}]
-        })
-
-    async def volume_down(self):
-        path = f"/devices/{self._device_id}/components/main/capabilities/audioNotification/execute"
-        await self._api_post(path, {
-            "commands": [{"component": "main", "capability": "execute", "command": "playFeedback", "arguments": [{"type": "volume", "command": "decrease"}]}]
-        })
-
-    async def switch_off(self):
-        path = f"/devices/{self._device_id}/components/main/capabilities/switch/execute"
-        await self._api_post(path, {
-            "commands": [{"component": "main", "capability": "execute", "command": "off", "arguments": []}]
-        })
-
-    async def switch_on(self):
-        path = f"/devices/{self._device_id}/components/main/capabilities/switch/execute"
-        await self._api_post(path, {
-            "commands": [{"component": "main", "capability": "execute", "command": "on", "arguments": []}]
-        })
-
+    def volume_muted(self) -> bool: return self._muted
     @property
     def input_source(self): return self._input_source
-
     @property
     def supported_input_sources(self): return ["digital", "bluetooth", "wifi"]
-
-    async def select_source(self, source: str):
-        # Firmware blocks input switching (HTTP 422)
-        log.warning("[soundbar] Input source switching is blocked by firmware")
-
     @property
     def sound_mode(self): return self._sound_mode
     @property
     def supported_soundmodes(self): return self._supported_soundmodes
-
-    async def select_sound_mode(self, sound_mode: str):
-        await self._sam_write("/sec/networkaudio/soundmode",
-                               "x.com.samsung.networkaudio.soundmode", sound_mode)
-
     @property
     def night_mode(self) -> bool: return self._night_mode == 1
-
-    async def set_night_mode(self, value: bool):
-        await self._sam_write("/sec/networkaudio/advancedaudio",
-                               "x.com.samsung.networkaudio.nightmode", 1 if value else 0)
-
     @property
     def bass_mode(self) -> bool: return self._bass_mode == 1
-
-    async def set_bass_mode(self, value: bool):
-        await self._sam_write("/sec/networkaudio/advancedaudio",
-                               "x.com.samsung.networkaudio.bassboost", 1 if value else 0)
-
     @property
     def voice_amplifier(self) -> bool: return self._voice_amplifier == 1
-
-    async def set_voice_amplifier(self, value: bool):
-        await self._sam_write("/sec/networkaudio/advancedaudio",
-                               "x.com.samsung.networkaudio.voiceamplifier", 1 if value else 0)
-
     @property
     def woofer_level(self) -> int: return self._woofer_level
     @property
     def woofer_connection(self) -> str: return self._woofer_connection
-
-    async def set_woofer(self, level: int):
-        await self._sam_write("/sec/networkaudio/woofer",
-                               "x.com.samsung.networkaudio.woofer", level)
-
-    @property
-    def active_equalizer_preset(self): return self._eq_preset
-    @property
-    def supported_equalizer_presets(self): return self._supported_eq_presets
-    async def set_equalizer_preset(self, preset: str):
-        await self._sam_write("/sec/networkaudio/eq",
-                               "x.com.samsung.networkaudio.EQname", preset)
-
     @property
     def media_title(self): return self._media_title
     @property
@@ -313,38 +196,60 @@ class SoundbarDevice:
     def media_coverart_url(self): return self._media_cover_url
     @property
     def media_coverart_updated(self): return self._media_cover_url_update_time
-
     @property
     def media_duration(self) -> int | None: return None
     @property
     def media_position(self) -> int | None: return None
 
+    # -------- Commands --------
+
+    async def set_volume(self, volume: float):
+        await self._cmd("execute", "setVolume", int(volume * self._max_volume))
+
+    async def mute_volume(self, mute: bool):
+        await self._cmd("mute" if mute else "unmute", "execute", [])
+
+    async def volume_up(self):
+        await self._cmd("audioNotification", "playFeedback", [{"type": "volume", "command": "increase"}])
+
+    async def volume_down(self):
+        await self._cmd("audioNotification", "playFeedback", [{"type": "volume", "command": "decrease"}])
+
+    async def switch_off(self):
+        await self._cmd("switch", "off")
+
+    async def switch_on(self):
+        await self._cmd("switch", "on")
+
+    async def select_source(self, source: str):
+        log.warning("[soundbar] Input source switching is blocked by firmware")
+
+    async def select_sound_mode(self, sound_mode: str):
+        await self._sam_write("/sec/networkaudio/soundmode", "x.com.samsung.networkaudio.soundmode", sound_mode)
+
+    async def set_night_mode(self, value: bool):
+        await self._sam_write("/sec/networkaudio/advancedaudio", "x.com.samsung.networkaudio.nightmode", 1 if value else 0)
+
+    async def set_bass_mode(self, value: bool):
+        await self._sam_write("/sec/networkaudio/advancedaudio", "x.com.samsung.networkaudio.bassboost", 1 if value else 0)
+
+    async def set_voice_amplifier(self, value: bool):
+        await self._sam_write("/sec/networkaudio/advancedaudio", "x.com.samsung.networkaudio.voiceamplifier", 1 if value else 0)
+
+    async def set_woofer(self, level: int):
+        await self._sam_write("/sec/networkaudio/woofer", "x.com.samsung.networkaudio.woofer", level)
+
     async def media_play(self):
-        path = f"/devices/{self._device_id}/components/main/capabilities/mediaPlayback/execute"
-        await self._api_post(path, {
-            "commands": [{"component": "main", "capability": "execute", "command": "play", "arguments": []}]
-        })
+        await self._cmd("mediaPlayback", "play")
 
     async def media_pause(self):
-        path = f"/devices/{self._device_id}/components/main/capabilities/mediaPlayback/execute"
-        await self._api_post(path, {
-            "commands": [{"component": "main", "capability": "execute", "command": "pause", "arguments": []}]
-        })
+        await self._cmd("mediaPlayback", "pause")
 
     async def media_stop(self):
-        path = f"/devices/{self._device_id}/components/main/capabilities/mediaPlayback/execute"
-        await self._api_post(path, {
-            "commands": [{"component": "main", "capability": "execute", "command": "stop", "arguments": []}]
-        })
+        await self._cmd("mediaPlayback", "stop")
 
     async def media_next_track(self):
-        path = f"/devices/{self._device_id}/components/main/capabilities/mediaPlayback/execute"
-        await self._api_post(path, {
-            "commands": [{"component": "main", "capability": "execute", "command": "fastForward", "arguments": []}]
-        })
+        await self._cmd("mediaPlayback", "fastForward")
 
     async def media_previous_track(self):
-        path = f"/devices/{self._device_id}/components/main/capabilities/mediaPlayback/execute"
-        await self._api_post(path, {
-            "commands": [{"component": "main", "capability": "execute", "command": "rewind", "arguments": []}]
-        })
+        await self._cmd("mediaPlayback", "rewind")
