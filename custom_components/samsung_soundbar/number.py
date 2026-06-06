@@ -38,6 +38,9 @@ class WooferLevelNumber(NumberEntity):
             "sw_version": device.firmware_version,
         }
 
+    async def async_update(self):
+        await self._device.refresh_woofer()
+
     @property
     def native_value(self) -> float | None:
         val = self._device.woofer_level

@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import json
 import logging
+import time
 from urllib.parse import quote
 
 log = logging.getLogger(__name__)
@@ -38,6 +39,13 @@ class SoundbarDevice:
         self._manufacturer = "Samsung"
         self._model = "HW-S60B"
         self._firmware_version = "unknown"
+
+        self._advanced_audio_last_refresh = 0.0
+        self._soundmode_last_refresh = 0.0
+        self._woofer_last_refresh = 0.0
+        self._advanced_audio_lock = asyncio.Lock()
+        self._soundmode_lock = asyncio.Lock()
+        self._woofer_lock = asyncio.Lock()
 
     # -------- Core API helpers (matching working standalone script) --------
 
@@ -129,11 +137,60 @@ class SoundbarDevice:
         self._model = ocf.get("ocf.modelNumber", {}).get("value", "HW-S60B")
         self._firmware_version = ocf.get("ocf.firmwareVersion", {}).get("value", "unknown")
 
-        # Do not poll Samsung advanced-audio resources during the normal HA update
-        # cycle. Those require multiple SmartThings execute/status calls and can
-        # quickly exhaust the PAT rate limit. Advanced settings are updated when
-        # commands are sent; default values remain safe until a future explicit
-        # low-frequency refresh is added.
+        # Do not poll Samsung advanced-audio resources during the normal media
+        # player update cycle. Switch/select/number entities use throttled
+        # resource-specific refresh methods below.
+
+    async def refresh_advanced_audio(self, min_interval: int = 300):
+        """Refresh Night Mode / Bass Boost / Voice Enhancement, throttled.
+
+        One refresh costs two SmartThings requests (execute + status). Multiple
+        HA switch entities share this cache so their update cycles do not multiply
+        API traffic.
+        """
+        now = time.monotonic()
+        if now - self._advanced_audio_last_refresh < min_interval:
+            return
+        async with self._advanced_audio_lock:
+            now = time.monotonic()
+            if now - self._advanced_audio_last_refresh < min_interval:
+                return
+            self._advanced_audio_last_refresh = now
+            payload = await self._sam_read("/sec/networkaudio/advancedaudio")
+            if "x.com.samsung.networkaudio.nightmode" in payload:
+                self._night_mode = payload["x.com.samsung.networkaudio.nightmode"]
+                self._bass_mode = payload.get("x.com.samsung.networkaudio.bassboost", self._bass_mode)
+                self._voice_amplifier = payload.get("x.com.samsung.networkaudio.voiceamplifier", self._voice_amplifier)
+
+    async def refresh_soundmode(self, min_interval: int = 300):
+        """Refresh sound mode, throttled."""
+        now = time.monotonic()
+        if now - self._soundmode_last_refresh < min_interval:
+            return
+        async with self._soundmode_lock:
+            now = time.monotonic()
+            if now - self._soundmode_last_refresh < min_interval:
+                return
+            self._soundmode_last_refresh = now
+            payload = await self._sam_read("/sec/networkaudio/soundmode")
+            if "x.com.samsung.networkaudio.soundmode" in payload:
+                self._sound_mode = payload["x.com.samsung.networkaudio.soundmode"]
+                self._supported_soundmodes = payload.get("x.com.samsung.networkaudio.supportedSoundmode", self._supported_soundmodes)
+
+    async def refresh_woofer(self, min_interval: int = 300):
+        """Refresh woofer level, throttled."""
+        now = time.monotonic()
+        if now - self._woofer_last_refresh < min_interval:
+            return
+        async with self._woofer_lock:
+            now = time.monotonic()
+            if now - self._woofer_last_refresh < min_interval:
+                return
+            self._woofer_last_refresh = now
+            payload = await self._sam_read("/sec/networkaudio/woofer")
+            if "x.com.samsung.networkaudio.woofer" in payload:
+                self._woofer_level = payload["x.com.samsung.networkaudio.woofer"]
+                self._woofer_connection = payload.get("x.com.samsung.networkaudio.connection", self._woofer_connection)
 
     async def _fetch_artwork(self, artist: str, title: str) -> str:
         if not artist or not title:

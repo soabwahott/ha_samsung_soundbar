@@ -37,6 +37,9 @@ class SoundModeSelect(SelectEntity):
             "sw_version": device.firmware_version,
         }
 
+    async def async_update(self):
+        await self._device.refresh_soundmode()
+
     @property
     def options(self) -> list[str]:
         opts = self._device.supported_soundmodes

@@ -47,8 +47,9 @@ class SoundbarSwitch(SwitchEntity):
             sw_version=device.firmware_version,
         )
 
-    def update(self):
+    async def async_update(self):
         try:
+            await self._device.refresh_advanced_audio()
             self._state = bool(self._state_fn())
         except Exception:
             self._state = False
