@@ -45,6 +45,8 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 class SoundbarMediaPlayer(MediaPlayerEntity):
     def __init__(self, device: SoundbarDevice):
         self._device = device
+        self._volume_level = None
+        self._is_volume_muted = None
         self._attr_unique_id = f"{device.device_id}_mp"
         self._attr_name = device.device_name
         self._attr_device_info = DeviceInfo(
@@ -57,6 +59,8 @@ class SoundbarMediaPlayer(MediaPlayerEntity):
 
     async def async_update(self):
         await self._device.update()
+        self._volume_level = self._device.volume_level
+        self._is_volume_muted = self._device.volume_muted
 
     @property
     def supported_features(self):
@@ -74,27 +78,33 @@ class SoundbarMediaPlayer(MediaPlayerEntity):
 
     @property
     def volume_level(self) -> float | None:
-        return self._device.volume_level
+        return self._volume_level if self._volume_level is not None else self._device.volume_level
 
     @property
     def is_volume_muted(self) -> bool | None:
-        return self._device.volume_muted
+        return self._is_volume_muted if self._is_volume_muted is not None else self._device.volume_muted
 
     async def async_set_volume_level(self, volume: float):
+        self._volume_level = max(0.0, min(1.0, volume))
+        self.async_write_ha_state()
         await self._device.set_volume(volume)
+        self._volume_level = self._device.volume_level
         self.async_write_ha_state()
 
     async def async_mute_volume(self, mute: bool):
+        self._is_volume_muted = mute
+        self.async_write_ha_state()
         await self._device.mute_volume(mute)
+        self._is_volume_muted = self._device.volume_muted
         self.async_write_ha_state()
 
     async def async_volume_up(self):
-        await self._device.volume_up()
-        self.async_write_ha_state()
+        current = self.volume_level or 0
+        await self.async_set_volume_level(min(1.0, current + 0.01))
 
     async def async_volume_down(self):
-        await self._device.volume_down()
-        self.async_write_ha_state()
+        current = self.volume_level or 0
+        await self.async_set_volume_level(max(0.0, current - 0.01))
 
     @property
     def source(self) -> str | None:
