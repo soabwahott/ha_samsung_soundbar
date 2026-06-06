@@ -35,6 +35,8 @@ class SoundbarDevice:
         self._state = "on"
         self._volume = 0
         self._muted = False
+        self._volume_hold_until = 0.0
+        self._mute_hold_until = 0.0
         self._input_source = "digital"
 
         self._manufacturer = "Samsung"
@@ -122,8 +124,15 @@ class SoundbarDevice:
         self._state = "playing" if switch.get("switch", {}).get("value") == "on" else "off"
 
         volume = comp.get("audioVolume", {})
-        self._volume = volume.get("volume", {}).get("value", 0)
-        self._muted = comp.get("audioMute", {}).get("mute", {}).get("value") == "muted"
+        raw_volume = volume.get("volume", {}).get("value", 0)
+        if time.monotonic() >= self._volume_hold_until or raw_volume == self._volume:
+            self._volume = raw_volume
+            self._volume_hold_until = 0.0
+
+        raw_muted = comp.get("audioMute", {}).get("mute", {}).get("value") == "muted"
+        if time.monotonic() >= self._mute_hold_until or raw_muted == self._muted:
+            self._muted = raw_muted
+            self._mute_hold_until = 0.0
 
         audio = comp.get("samsungvd.audioInputSource", {})
         self._input_source = audio.get("inputSource", {}).get("value", "digital")
@@ -276,17 +285,21 @@ class SoundbarDevice:
         level = max(0, min(self._max_volume, int(round(volume * self._max_volume))))
         previous = self._volume
         self._volume = level
+        self._volume_hold_until = time.monotonic() + 20
         result = await self._cmd("audioVolume", "setVolume", level)
         if str(result).endswith("Error"):
             self._volume = previous
+            self._volume_hold_until = 0.0
         return result
 
     async def mute_volume(self, mute: bool):
         previous = self._muted
         self._muted = mute
+        self._mute_hold_until = time.monotonic() + 20
         result = await self._cmd("audioMute", "mute" if mute else "unmute")
         if str(result).endswith("Error"):
             self._muted = previous
+            self._mute_hold_until = 0.0
         return result
 
     async def volume_up(self):
