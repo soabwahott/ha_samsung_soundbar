@@ -51,19 +51,31 @@ class SoundbarSwitch(SwitchEntity, RestoreEntity):
             sw_version=device.firmware_version,
         )
 
+    async def async_added_to_hass(self):
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state in ("on", "off"):
+            self._state = last_state.state == "on"
+
     async def async_update(self):
         try:
             await self._device.refresh_advanced_audio()
-            self._state = bool(self._state_fn())
+            val = self._state_fn()
+            if val is not None:
+                self._state = bool(val)
         except Exception:
-            self._state = None
+            # Keep the previous/restore state instead of claiming a false off.
+            pass
 
     @property
     def is_on(self):
         return self._state
 
-    async def async_turn_on(self):
+    async def async_turn_on(self, **kwargs):
         await self._on_fn(True)
+        self._state = True
+        self.async_write_ha_state()
 
-    async def async_turn_off(self):
+    async def async_turn_off(self, **kwargs):
         await self._on_fn(False)
+        self._state = False
+        self.async_write_ha_state()
