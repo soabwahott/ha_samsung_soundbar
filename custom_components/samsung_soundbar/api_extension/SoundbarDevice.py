@@ -51,12 +51,16 @@ class SoundbarDevice:
         }
         body = json.dumps(data).encode() if data else None
 
-        async with self._session.request(method, url, headers=headers, data=body) as resp:
-            text = await resp.text()
-            try:
-                return json.loads(text)
-            except:
-                return text
+        try:
+            async with self._session.request(method, url, headers=headers, data=body) as resp:
+                text = await resp.text()
+                try:
+                    return json.loads(text)
+                except:
+                    return text
+        except Exception as e:
+            log.warning("[soundbar] API %s %s failed: %s", method, path, e)
+            return {}
 
     async def _cmd(self, capability: str, command: str, *args):
         """Execute a command via /devices/{id}/commands endpoint (the working way)."""
@@ -67,15 +71,19 @@ class SoundbarDevice:
         return str(result)
 
     async def _sam_read(self, href: str) -> dict:
-        """Read Samsung Audio API resource: trigger execute + poll status."""
-        await self._cmd("execute", "execute", href)
-        await asyncio.sleep(0.3)
-        for _ in range(8):
-            status = await self._api("GET", f"/devices/{self._device_id}/components/main/capabilities/execute/status")
-            val = status.get("data", {}).get("value")
-            if val and isinstance(val, dict):
-                return val.get("payload", {})
-            await asyncio.sleep(0.2)
+        """Read Samsung Audio API resource: trigger execute + poll status.
+        Returns {} if rate limited (does NOT retry, to avoid worsening the limit)."""
+        result = await self._cmd("execute", "execute", href)
+        if result in ("", "RATE_LIMITED", "COMPLETED"):
+            await asyncio.sleep(0.3)
+            for _ in range(5):
+                status = await self._api("GET", f"/devices/{self._device_id}/components/main/capabilities/execute/status")
+                if isinstance(status, dict) and status.get("error", {}).get("code") == "TooManyRequestError":
+                    return {}  # Don't retry, just return empty
+                val = status.get("data", {}).get("value")
+                if val and isinstance(val, dict):
+                    return val.get("payload", {})
+                await asyncio.sleep(0.2)
         return {}
 
     async def _sam_write(self, href: str, prop: str, value):
