@@ -25,6 +25,7 @@ class SoundbarDevice:
         self._woofer_connection = ""
         self._sound_mode = ""
         self._supported_soundmodes = ["standard", "surround", "game", "adaptive"]
+        self._supported_input_sources = ["digital", "bluetooth", "wifi"]
         self._media_title = ""
         self._media_artist = ""
         self._media_cover_url = ""
@@ -228,7 +229,7 @@ class SoundbarDevice:
     @property
     def input_source(self): return self._input_source
     @property
-    def supported_input_sources(self): return ["digital", "bluetooth", "wifi"]
+    def supported_input_sources(self): return self._supported_input_sources
     @property
     def sound_mode(self): return self._sound_mode
     @property
