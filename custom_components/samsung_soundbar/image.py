@@ -17,16 +17,15 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
     for device_id, device_config in domain_data.devices.items():
         device: SoundbarDevice = device_config.device
-        async_add_entities([SoundbarArtwork(device)])
+        async_add_entities([SoundbarArtwork(device, hass)])
 
 
 class SoundbarArtwork(ImageEntity):
-    def __init__(self, device: SoundbarDevice):
+    def __init__(self, device: SoundbarDevice, hass):
         super().__init__(hass)
         self._device = device
         self._attr_unique_id = f"{device.device_id}_image_artwork"
         self._attr_name = f"{device.device_name} Album Art"
-        self._cached_image = None
         self._cached_url = None
 
     @property
@@ -34,7 +33,6 @@ class SoundbarArtwork(ImageEntity):
         url = self._device.media_coverart_url
         if url and url != self._cached_url:
             self._cached_url = url
-            self._cached_image = None
         return url if url else None
 
     @property

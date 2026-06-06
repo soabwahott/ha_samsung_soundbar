@@ -52,7 +52,7 @@ class SoundbarDevice:
 
     async def _api_post(self, path: str, json_data: dict):
         url = SMARTTHINGS_BASE + path
-        headers = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json", "Accept": "application/json"}
         async with self._session.post(url, headers=headers, json=json_data) as resp:
             data = await resp.json()
             if not resp.ok:
