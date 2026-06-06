@@ -76,6 +76,8 @@ class SoundbarDevice:
         payload = {"commands": [{"component": "main", "capability": capability, "command": command, "arguments": list(args)}]}
         result = await self._api("POST", f"/devices/{self._device_id}/commands", payload)
         if isinstance(result, dict):
+            if "error" in result:
+                return result.get("error", {}).get("code", "ERROR")
             return result.get("results", [{}])[0].get("status", "")
         return str(result)
 
@@ -100,6 +102,8 @@ class SoundbarDevice:
         payload = {"commands": [{"component": "main", "capability": "execute", "command": "execute", "arguments": [href, {prop: value}]}]}
         result = await self._api("POST", f"/devices/{self._device_id}/commands", payload)
         if isinstance(result, dict):
+            if "error" in result:
+                return result.get("error", {}).get("code", "ERROR")
             return result.get("results", [{}])[0].get("status", "")
         return str(result)
 
@@ -271,13 +275,13 @@ class SoundbarDevice:
     async def set_volume(self, volume: float):
         level = max(0, min(self._max_volume, int(round(volume * self._max_volume))))
         result = await self._cmd("audioVolume", "setVolume", level)
-        if result == "COMPLETED":
+        if not str(result).endswith("Error"):
             self._volume = level
         return result
 
     async def mute_volume(self, mute: bool):
         result = await self._cmd("audioMute", "mute" if mute else "unmute")
-        if result == "COMPLETED":
+        if not str(result).endswith("Error"):
             self._muted = mute
         return result
 
