@@ -82,15 +82,19 @@ class SoundbarMediaPlayer(MediaPlayerEntity):
 
     async def async_set_volume_level(self, volume: float):
         await self._device.set_volume(volume)
+        self.async_write_ha_state()
 
     async def async_mute_volume(self, mute: bool):
         await self._device.mute_volume(mute)
+        self.async_write_ha_state()
 
     async def async_volume_up(self):
         await self._device.volume_up()
+        self.async_write_ha_state()
 
     async def async_volume_down(self):
         await self._device.volume_down()
+        self.async_write_ha_state()
 
     @property
     def source(self) -> str | None:

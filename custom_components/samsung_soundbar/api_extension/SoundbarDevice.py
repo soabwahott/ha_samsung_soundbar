@@ -269,16 +269,25 @@ class SoundbarDevice:
     # -------- Commands --------
 
     async def set_volume(self, volume: float):
-        await self._cmd("execute", "setVolume", int(volume * self._max_volume))
+        level = max(0, min(self._max_volume, int(round(volume * self._max_volume))))
+        result = await self._cmd("audioVolume", "setVolume", level)
+        if result == "COMPLETED":
+            self._volume = level
+        return result
 
     async def mute_volume(self, mute: bool):
-        await self._cmd("mute" if mute else "unmute", "execute", [])
+        result = await self._cmd("audioMute", "mute" if mute else "unmute")
+        if result == "COMPLETED":
+            self._muted = mute
+        return result
 
     async def volume_up(self):
-        await self._cmd("audioNotification", "playFeedback", [{"type": "volume", "command": "increase"}])
+        level = max(0, min(self._max_volume, int(self._volume) + 1))
+        return await self.set_volume(level / self._max_volume)
 
     async def volume_down(self):
-        await self._cmd("audioNotification", "playFeedback", [{"type": "volume", "command": "decrease"}])
+        level = max(0, min(self._max_volume, int(self._volume) - 1))
+        return await self.set_volume(level / self._max_volume)
 
     async def switch_off(self):
         await self._cmd("switch", "off")
