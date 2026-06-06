@@ -40,7 +40,8 @@ class WooferLevelNumber(NumberEntity):
 
     @property
     def native_value(self) -> float | None:
-        return float(self._device.woofer_level)
+        val = self._device.woofer_level
+        return float(val) if val is not None else None
 
     async def async_set_native_value(self, value: float):
         await self._device.set_woofer(int(value))

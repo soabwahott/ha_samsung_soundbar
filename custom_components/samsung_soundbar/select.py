@@ -24,8 +24,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
 
 class SoundModeSelect(SelectEntity):
-    _attr_name = None  # set in __init__
-
     def __init__(self, device: SoundbarDevice):
         self._device = device
         self._attr_unique_id = f"{device.device_id}_select_soundmode"
@@ -41,11 +39,13 @@ class SoundModeSelect(SelectEntity):
 
     @property
     def options(self) -> list[str]:
-        return self._device.supported_soundmodes
+        opts = self._device.supported_soundmodes
+        return opts if opts else []
 
     @property
     def current_option(self) -> str | None:
-        return self._device.sound_mode
+        val = self._device.sound_mode
+        return val if val else None
 
     async def async_select_option(self, option: str):
         await self._device.select_sound_mode(option)
@@ -71,7 +71,8 @@ class InputSourceSelect(SelectEntity):
 
     @property
     def current_option(self) -> str | None:
-        return self._device.input_source
+        val = self._device.input_source
+        return val if val else None
 
     async def async_select_option(self, option: str):
         await self._device.select_source(option)

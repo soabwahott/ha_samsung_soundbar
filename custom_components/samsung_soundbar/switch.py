@@ -11,7 +11,6 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    """Set up switches from discovery (env var mode)."""
     domain_data: SoundbarConfig = hass.data.get(DOMAIN)
     if not domain_data:
         return
@@ -20,11 +19,11 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         device: SoundbarDevice = device_config.device
         entities = [
             SoundbarSwitch(device, "nightmode", "Night Mode", "mdi:weather-night",
-                           lambda d: d.night_mode, device.set_night_mode),
+                           lambda d: bool(d.night_mode), device.set_night_mode),
             SoundbarSwitch(device, "bassmode", "Bass Boost", "mdi:speaker-wireless",
-                           lambda d: d.bass_mode, device.set_bass_mode),
+                           lambda d: bool(d.bass_mode), device.set_bass_mode),
             SoundbarSwitch(device, "voice_amplifier", "Voice Enhancement", "mdi:account-voice",
-                           lambda d: d.voice_amplifier, device.set_voice_amplifier),
+                           lambda d: bool(d.voice_amplifier), device.set_voice_amplifier),
         ]
         async_add_entities(entities)
 
@@ -32,7 +31,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 class SoundbarSwitch(SwitchEntity):
     def __init__(self, device: SoundbarDevice, key: str, name: str,
                  icon: str, state_fn, on_fn):
-        self.entity_id = f"switch.{device.device_name.replace(' ', '_').lower()}_{key}"
         self._device = device
         self._key = key
         self._attr_name = f"{device.device_name} {name}"
@@ -50,7 +48,10 @@ class SoundbarSwitch(SwitchEntity):
         )
 
     def update(self):
-        self._state = self._state_fn()
+        try:
+            self._state = bool(self._state_fn())
+        except Exception:
+            self._state = False
 
     @property
     def is_on(self):

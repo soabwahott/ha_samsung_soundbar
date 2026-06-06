@@ -34,4 +34,5 @@ class VolumeSensor(SensorEntity):
         }
 
     def update(self):
-        self._attr_native_value = self._device._volume
+        val = self._device._volume
+        self._attr_native_value = val if val is not None else 0
